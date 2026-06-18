@@ -1,6 +1,7 @@
 import io
 from pathlib import Path
 
+from faction_registry import Faction
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -18,20 +19,14 @@ _COLUMNS       = [("#", 5), ("Item Name", 42), ("Price", 12), ("Website Link", 5
 
 
 class WorksheetBuilder:
-    def write(
-        self,
-        title: str,
-        output_path: str,
-        products: list[tuple],
-        manifest: dict[str, io.BytesIO | None],
-    ) -> None:
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        n = len(products)
-        print(f"\nBuilding {title} -- {n} products")
+    def write(self, faction: Faction, manifest: dict[str, io.BytesIO | None]) -> None:
+        Path(faction.output).parent.mkdir(parents=True, exist_ok=True)
+        n = len(faction.products)
+        print(f"\nBuilding {faction.title} -- {n} products")
 
         wb = Workbook()
         ws = wb.active
-        ws.title = title
+        ws.title = faction.title
 
         hdr_fill = PatternFill(start_color=_HEADER_BG, end_color=_HEADER_BG, fill_type="solid")
         hdr_font = Font(color=_HEADER_FG, bold=True, size=11)
@@ -46,31 +41,31 @@ class WorksheetBuilder:
             ws.column_dimensions[get_column_letter(ci)].width = width
         ws.row_dimensions[1].height = 20
 
-        for i, (name, price, slug, img_file) in enumerate(products, 1):
+        for i, product in enumerate(faction.products, 1):
             row = i + 1
             ws.row_dimensions[row].height = _ROW_HEIGHT_PT
 
             ws.cell(row=row, column=1, value=i).alignment = center
-            ws.cell(row=row, column=2, value=name).alignment = mid_left
-            ws.cell(row=row, column=3, value=price).alignment = center
+            ws.cell(row=row, column=2, value=product.name).alignment = mid_left
+            ws.cell(row=row, column=3, value=product.price).alignment = center
 
-            url = _SHOP_BASE + slug
+            url = _SHOP_BASE + product.slug
             lc  = ws.cell(row=row, column=4, value=url)
             lc.hyperlink = url
             lc.font      = Font(color=_LINK_COLOR, underline="single")
             lc.alignment = mid_left
 
-            buf = manifest.get(img_file)
+            buf = manifest.get(product.image_file)
             if buf:
                 xl_img        = XLImage(buf)
                 xl_img.width  = _THUMB_W
                 xl_img.height = _THUMB_H
                 ws.add_image(xl_img, f"E{row}")
             else:
-                print(f"  [warn] image missing: {img_file}")
+                print(f"  [warn] image missing: {product.image_file}")
 
-            ws.cell(row=row, column=6, value=_IMG_BASE + img_file).alignment = mid_left
-            print(f"  [{i:02d}/{n}] {name}")
+            ws.cell(row=row, column=6, value=_IMG_BASE + product.image_file).alignment = mid_left
+            print(f"  [{i:02d}/{n}] {product.name}")
 
-        wb.save(output_path)
-        print(f"Done: {output_path}")
+        wb.save(faction.output)
+        print(f"Done: {faction.output}")

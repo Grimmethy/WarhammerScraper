@@ -16,20 +16,20 @@ Examples:
 import sys
 from pathlib import Path
 
+from faction_registry import FactionRegistry
 from factions import FACTIONS
 from image_pipeline import ImagePipeline
 from worksheet_builder import WorksheetBuilder
 
-_IMG_DIR = Path("data/images")
+_IMG_DIR  = Path("data/images")
+_registry = FactionRegistry(FACTIONS)
 
 
 def build_faction(key: str) -> None:
-    faction   = FACTIONS[key]
-    products  = faction["products"]
-    filenames = [img_file for _, _, _, img_file in products]
-
-    manifest = ImagePipeline(img_dir=_IMG_DIR).fetch_all(filenames)
-    WorksheetBuilder().write(faction["title"], faction["output"], products, manifest)
+    faction   = _registry.load(key)
+    filenames = [p.image_file for p in faction.products]
+    manifest  = ImagePipeline(img_dir=_IMG_DIR).fetch_all(filenames)
+    WorksheetBuilder().write(faction, manifest)
 
 
 def main() -> None:
@@ -41,13 +41,14 @@ def main() -> None:
 
     if args[0] == "--list":
         print("Available factions:")
-        for key, f in FACTIONS.items():
-            print(f"  {key:<30} ({len(f['products'])} products)  ->  {f['output']}")
+        for key in _registry.keys():
+            f = _registry.load(key)
+            print(f"  {key:<30} ({len(f.products)} products)  ->  {f.output}")
         sys.exit(0)
 
-    keys = list(FACTIONS.keys()) if args[0] == "--all" else args
+    keys = list(_registry.keys()) if args[0] == "--all" else args
 
-    unknown = [k for k in keys if k not in FACTIONS]
+    unknown = [k for k in keys if k not in _registry]
     if unknown:
         print(f"Unknown faction(s): {', '.join(unknown)}")
         print("Run 'python build.py --list' to see available keys.")
