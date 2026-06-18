@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Architecture review — WarhammerScraper</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+  </script>
+  <style>
+    .seam { stroke-dasharray: 4 4; }
+    .leak { stroke: #dc2626; }
+    .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    .module-box { border: 2px solid #94a3b8; border-radius: 6px; padding: 8px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; background: #f8fafc; }
+    .deep-box { border: 3px solid #0f172a; border-radius: 6px; padding: 8px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; background: #1e293b; color: #f8fafc; }
+    .seam-line { border-left: 2px dashed #94a3b8; margin: 0 auto; }
+    .leak-line { border-left: 2px solid #dc2626; }
+    .arrow { color: #64748b; font-size: 18px; line-height: 1; }
+    .leak-arrow { color: #dc2626; font-size: 18px; line-height: 1; }
+    body { font-family: 'Georgia', serif; }
+    .label-mono { font-family: 'Courier New', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .band { height: 40px; display: flex; align-items: center; padding-left: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; border-left: 4px solid; }
+  </style>
+</head>
+<body class="bg-stone-50 text-slate-900">
+<main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+  <!-- HEADER -->
+  <header class="border-b border-slate-200 pb-6">
+    <div class="flex items-baseline justify-between">
+      <div>
+        <h1 class="text-3xl font-serif font-bold text-slate-900">WarhammerScraper</h1>
+        <p class="text-slate-500 text-sm mt-1">Architecture review · 2026-06-18</p>
+      </div>
+      <div class="text-xs text-slate-400 text-right leading-6">
+        <div class="flex items-center gap-2 justify-end"><span class="inline-block w-4 h-4 border-2 border-slate-400 rounded bg-slate-50"></span> module</div>
+        <div class="flex items-center gap-2 justify-end"><span class="inline-block w-4 border-t-2 border-dashed border-slate-400"></span> seam</div>
+        <div class="flex items-center gap-2 justify-end"><span class="inline-block w-4 border-t-2 border-red-500"></span> leakage</div>
+        <div class="flex items-center gap-2 justify-end"><span class="inline-block w-4 h-4 border-2 border-slate-900 rounded bg-slate-800"></span> deep module</div>
+      </div>
+    </div>
+    <p class="mt-4 text-slate-600 text-sm max-w-2xl">Four candidates ranked by deepening opportunity. Each card shows the friction in the current module, the deepened alternative, and what tests become possible at the new interface.</p>
+  </header>
+
+  <!-- CANDIDATES -->
+  <section id="candidates" class="space-y-12">
+
+    <!-- CANDIDATE 1 -->
+    <article class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-8 pt-8 pb-6">
+        <div class="flex items-start justify-between gap-4 mb-4">
+          <h2 class="text-xl font-serif font-bold text-slate-900">1. Deepen <code class="text-base font-mono bg-slate-100 px-2 py-0.5 rounded">build_faction</code> — split image pipeline from worksheet builder</h2>
+          <div class="flex gap-2 shrink-0">
+            <span class="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="px-3 py-1 rounded-full text-xs font-mono bg-slate-100 text-slate-600">in-process</span>
+          </div>
+        </div>
+
+        <div class="font-mono text-sm text-slate-500 mb-6 space-y-0.5">
+          <div>build.py</div>
+        </div>
+
+        <!-- BEFORE / AFTER DIAGRAMS -->
+        <div class="grid grid-cols-2 gap-6 mb-6">
+          <!-- BEFORE -->
+          <div>
+            <p class="label-mono text-slate-400 mb-3">Before — shallow</p>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <pre class="mermaid text-xs">
+flowchart TD
+  CLI["CLI: build_faction(key)"]
+  CLI --> LookupFac["lookup FACTIONS[key]"]
+  LookupFac --> InitWB["init workbook + headers"]
+  InitWB --> Loop["for each product"]
+  Loop --> DL["download_image() — network I/O"]
+  DL --> Thumb["make_thumbnail() — disk + PIL"]
+  Thumb --> WriteRow["write cells + embed image"]
+  WriteRow --> Loop
+  Loop --> Save["wb.save()"]
+
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  classDef shallow stroke:#94a3b8,stroke-width:1.5px;
+  class DL,Thumb,WriteRow leak
+  class CLI,Loop,Save shallow
+              </pre>
+            </div>
+            <p class="text-xs text-slate-400 mt-2">Network I/O, PIL, and xlsx formatting share one loop body. Interface: one function. Implementation: six concerns.</p>
+          </div>
+
+          <!-- AFTER -->
+          <div>
+            <p class="label-mono text-slate-400 mb-3">After — deep</p>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <pre class="mermaid text-xs">
+flowchart TD
+  CLI["CLI: build(key)"]
+  CLI --> IP["ImagePipeline.fetch_all(products)"]
+  IP --> Manifest["image manifest: {filename → local_path|None}"]
+  Manifest --> WB["WorksheetBuilder.write(faction, manifest)"]
+  WB --> Save["wb.save()"]
+
+  classDef deep fill:#1e293b,stroke:#0f172a,color:#f8fafc,stroke-width:2px;
+  classDef seam fill:#f0fdf4,stroke:#86efac,stroke-width:1.5px;
+  classDef cli stroke:#94a3b8;
+  class IP,WB deep
+  class Manifest seam
+  class CLI,Save cli
+              </pre>
+            </div>
+            <p class="text-xs text-slate-400 mt-2">Seam is a simple dict. Each module is deep — narrow interface, rich implementation. Network I/O and formatting never share a call frame.</p>
+          </div>
+        </div>
+
+        <!-- MASS DIAGRAM (interface vs implementation) -->
+        <div class="mb-6">
+          <p class="label-mono text-slate-400 mb-3">Module depth — interface surface vs implementation mass</p>
+          <div class="flex gap-6 items-end">
+            <div class="flex flex-col items-center gap-1">
+              <p class="text-xs text-slate-500">Current</p>
+              <div class="flex gap-2 items-end">
+                <div class="flex flex-col items-center">
+                  <div class="w-20 bg-slate-200 border border-slate-300 rounded-t" style="height:24px;"></div>
+                  <div class="w-20 bg-slate-400 border border-slate-500 rounded-b" style="height:80px;"></div>
+                  <p class="text-xs text-slate-500 mt-1">build_faction</p>
+                </div>
+              </div>
+              <p class="text-xs text-red-500 mt-1">interface ≈ 30% of height — shallow</p>
+            </div>
+            <div class="text-2xl text-slate-300 self-center">→</div>
+            <div class="flex flex-col items-center gap-1">
+              <p class="text-xs text-slate-500">After deepening</p>
+              <div class="flex gap-3 items-end">
+                <div class="flex flex-col items-center">
+                  <div class="w-20 bg-slate-200 border border-slate-300 rounded-t" style="height:8px;"></div>
+                  <div class="w-20 bg-slate-800 border border-slate-900 rounded-b" style="height:80px;"></div>
+                  <p class="text-xs text-slate-500 mt-1">ImagePipeline</p>
+                </div>
+                <div class="flex flex-col items-center">
+                  <div class="w-20 bg-slate-200 border border-slate-300 rounded-t" style="height:8px;"></div>
+                  <div class="w-20 bg-slate-800 border border-slate-900 rounded-b" style="height:80px;"></div>
+                  <p class="text-xs text-slate-500 mt-1">WorksheetBuilder</p>
+                </div>
+              </div>
+              <p class="text-xs text-emerald-600 mt-1">interface ≈ 10% of height — deep</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-6 text-sm">
+          <div>
+            <p class="label-mono text-red-400 mb-2">Problem</p>
+            <p class="text-slate-700">build_faction is shallow — interface (one function, six parameters) is nearly as complex as the implementation (fetch, thumbnail, format, link, embed, save).</p>
+          </div>
+          <div>
+            <p class="label-mono text-slate-500 mb-2">Solution</p>
+            <p class="text-slate-700">One seam between <code class="font-mono bg-slate-100 px-1 rounded">ImagePipeline</code> and <code class="font-mono bg-slate-100 px-1 rounded">WorksheetBuilder</code>. The seam carries a manifest dict — no PIL, no xlsx, no requests on either side of it.</p>
+          </div>
+          <div>
+            <p class="label-mono text-emerald-600 mb-2">Wins</p>
+            <ul class="space-y-1 text-slate-700">
+              <li>· locality: network errors surface at the pipeline boundary, not mid-row</li>
+              <li>· leverage: test WorksheetBuilder with a fake manifest — no network, no disk</li>
+              <li>· test ImagePipeline independently with fixture files</li>
+              <li>· run pipeline once, rebuild xlsx N times</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- CANDIDATE 2 -->
+    <article class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-8 pt-8 pb-6">
+        <div class="flex items-start justify-between gap-4 mb-4">
+          <h2 class="text-xl font-serif font-bold text-slate-900">2. Create a <code class="text-base font-mono bg-slate-100 px-2 py-0.5 rounded">FactionRegistry</code> seam — validate on load, not in the loop</h2>
+          <div class="flex gap-2 shrink-0">
+            <span class="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="px-3 py-1 rounded-full text-xs font-mono bg-slate-100 text-slate-600">in-process</span>
+          </div>
+        </div>
+
+        <div class="font-mono text-sm text-slate-500 mb-6 space-y-0.5">
+          <div>factions.py · build.py</div>
+        </div>
+
+        <!-- BEFORE / AFTER DIAGRAMS -->
+        <div class="grid grid-cols-2 gap-6 mb-6">
+          <!-- BEFORE - cross-section -->
+          <div>
+            <p class="label-mono text-slate-400 mb-3">Before — data leaks raw into caller</p>
+            <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-1">
+              <div class="band bg-slate-50 border-slate-300 text-slate-600">factions.py — FACTIONS dict (1,309 lines)</div>
+              <div class="flex justify-center py-1"><span class="text-red-400 text-lg font-bold">↓ raw dict, no contract</span></div>
+              <div class="band bg-red-50 border-red-300 text-red-700">build_faction — FACTIONS[key] with implicit shape</div>
+              <div class="flex justify-center py-1"><span class="text-red-400 text-sm">KeyError if key missing · TypeError if "products" missing</span></div>
+              <div class="band bg-red-50 border-red-300 text-red-700">loop — (name, price, slug, img_file) tuple unpacking</div>
+              <div class="flex justify-center py-1"><span class="text-red-400 text-sm">ValueError if tuple has wrong length · silent xlsx corruption</span></div>
+              <div class="band bg-slate-50 border-slate-300 text-slate-600">xlsx output</div>
+            </div>
+            <p class="text-xs text-red-400 mt-2">Every layer assumes the dict shape is correct. Failures are late and opaque.</p>
+          </div>
+
+          <!-- AFTER - cross-section -->
+          <div>
+            <p class="label-mono text-slate-400 mb-3">After — seam validates at load time</p>
+            <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-1">
+              <div class="band bg-slate-800 border-slate-900 text-slate-100">FactionRegistry.load(key) → Faction</div>
+              <div class="flex justify-center py-1"><span class="text-emerald-500 text-sm">validates schema · raises FactionNotFoundError early</span></div>
+              <div class="band bg-slate-800 border-slate-900 text-slate-100">Faction dataclass — title, output, products: list[Product]</div>
+              <div class="flex justify-center py-1"><span class="text-emerald-500 text-sm">typed, validated · Product has name, price, slug, image_file</span></div>
+              <div class="band bg-slate-100 border-slate-400 text-slate-700">WorksheetBuilder.write(faction: Faction, …)</div>
+              <div class="flex justify-center py-1"><span class="text-slate-400 text-sm">only receives valid data — no defensive checks needed</span></div>
+              <div class="band bg-slate-50 border-slate-300 text-slate-600">xlsx output</div>
+            </div>
+            <p class="text-xs text-emerald-600 mt-2">Errors fail at the registry boundary, not mid-row. Build logic is simplified.</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-6 text-sm">
+          <div>
+            <p class="label-mono text-red-400 mb-2">Problem</p>
+            <p class="text-slate-700">factions.py has no interface — it exports a raw dict. Callers know its shape implicitly. No seam exists between "data" and "build" — errors propagate to the worst possible moment (mid-loop, mid-xlsx-write).</p>
+          </div>
+          <div>
+            <p class="label-mono text-slate-500 mb-2">Solution</p>
+            <p class="text-slate-700">A <code class="font-mono bg-slate-100 px-1 rounded">FactionRegistry</code> module with a <code class="font-mono bg-slate-100 px-1 rounded">load(key)</code> interface returning a validated <code class="font-mono bg-slate-100 px-1 rounded">Faction</code> dataclass. Validation at load time; downstream code gets clean types.</p>
+          </div>
+          <div>
+            <p class="label-mono text-emerald-600 mb-2">Wins</p>
+            <ul class="space-y-1 text-slate-700">
+              <li>· locality: all schema errors surface at one place</li>
+              <li>· leverage: build logic drops all defensive dict-key checks</li>
+              <li>· test registry in isolation with fixture dicts</li>
+              <li>· the seam justifies typed tests for Faction</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- CANDIDATE 3 -->
+    <article class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-8 pt-8 pb-6">
+        <div class="flex items-start justify-between gap-4 mb-4">
+          <h2 class="text-xl font-serif font-bold text-slate-900">3. Delete <code class="text-base font-mono bg-slate-100 px-2 py-0.5 rounded">scraper.py</code> — the hypothetical seam isn't real</h2>
+          <div class="flex gap-2 shrink-0">
+            <span class="px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="px-3 py-1 rounded-full text-xs font-mono bg-slate-100 text-slate-600">ports &amp; adapters</span>
+          </div>
+        </div>
+
+        <div class="font-mono text-sm text-slate-500 mb-6 space-y-0.5">
+          <div>scraper.py · build.py</div>
+        </div>
+
+        <!-- BEFORE / AFTER - call graph collapse -->
+        <div class="grid grid-cols-2 gap-6 mb-6">
+          <div>
+            <p class="label-mono text-slate-400 mb-3">Before — two adapters, one target</p>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <pre class="mermaid text-xs">
+flowchart TD
+  A["build.py"] -->|uses| CDN["warhammer.com CDN"]
+  B["scraper.py"] -->|uses| CDN
+  A -->|"download_image()"| IA["image logic v1"]
+  B -->|"download_image()"| IB["image logic v2"]
+  A -.-|"never calls"| B
+
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  classDef dead stroke:#94a3b8,stroke-dasharray:4 2,color:#94a3b8;
+  class B,IB dead
+  class IA,IB leak
+              </pre>
+            </div>
+            <p class="text-xs text-red-400 mt-2">One adapter = a hypothetical seam. The second adapter (scraper.py) is never wired in — the seam doesn't exist in practice.</p>
+          </div>
+
+          <div>
+            <p class="label-mono text-slate-400 mb-3">After — one adapter, one target</p>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <pre class="mermaid text-xs">
+flowchart TD
+  A["build.py (ImagePipeline)"] -->|uses| CDN["warhammer.com CDN"]
+  A --> IA["image logic — single source"]
+  Note["scraper.py deleted\nManual extraction documented\nin AGENTS.md"]
+
+  classDef deep fill:#1e293b,stroke:#0f172a,color:#f8fafc;
+  classDef note fill:#fefce8,stroke:#fde68a,color:#78350f;
+  class A,IA deep
+  class Note note
+              </pre>
+            </div>
+            <p class="text-xs text-emerald-600 mt-2">Deletion test passes: removing scraper.py concentrates the complexity back into one canonical place rather than spreading it.</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-6 text-sm">
+          <div>
+            <p class="label-mono text-red-400 mb-2">Problem</p>
+            <p class="text-slate-700">scraper.py is a dead adapter — 305 lines of async Playwright code that duplicates image logic from build.py and is never called. One adapter justifies only a hypothetical seam; two adapters that never share a caller justify nothing.</p>
+          </div>
+          <div>
+            <p class="label-mono text-slate-500 mb-2">Solution</p>
+            <p class="text-slate-700">Delete scraper.py. Document the manual extraction workflow (browser injection → factions.py) in AGENTS.md or a WORKFLOW.md. If a real seam ever emerges (e.g., scraper runs in CI), the two adapters are justified at that point.</p>
+          </div>
+          <div>
+            <p class="label-mono text-emerald-600 mb-2">Wins</p>
+            <ul class="space-y-1 text-slate-700">
+              <li>· locality: image download logic in one place</li>
+              <li>· interface surface of the codebase shrinks</li>
+              <li>· no divergence risk between two implementations</li>
+              <li>· the manual process becomes the canonical workflow</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- CANDIDATE 4 -->
+    <article class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-8 pt-8 pb-6">
+        <div class="flex items-start justify-between gap-4 mb-4">
+          <h2 class="text-xl font-serif font-bold text-slate-900">4. Introduce game-system hierarchy — stop leaking across a missing seam</h2>
+          <div class="flex gap-2 shrink-0">
+            <span class="px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">Speculative</span>
+            <span class="px-3 py-1 rounded-full text-xs font-mono bg-slate-100 text-slate-600">in-process</span>
+          </div>
+        </div>
+
+        <div class="font-mono text-sm text-slate-500 mb-6 space-y-0.5">
+          <div>factions.py</div>
+        </div>
+
+        <!-- BEFORE / AFTER hand-built -->
+        <div class="grid grid-cols-2 gap-6 mb-6">
+          <!-- BEFORE - flat namespace -->
+          <div>
+            <p class="label-mono text-slate-400 mb-3">Before — flat namespace, leaking game boundaries</p>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <div class="relative">
+                <div class="border-2 border-red-300 rounded-lg p-3 bg-red-50">
+                  <p class="label-mono text-red-500 mb-2">FACTIONS = &#123; }</p>
+                  <div class="grid grid-cols-2 gap-1 text-xs font-mono">
+                    <div class="bg-blue-100 border border-blue-300 rounded px-2 py-1 text-blue-700">stormcast_eternals</div>
+                    <div class="bg-blue-100 border border-blue-300 rounded px-2 py-1 text-blue-700">flesh_eater_courts</div>
+                    <div class="bg-purple-100 border border-purple-300 rounded px-2 py-1 text-purple-700">space_marines</div>
+                    <div class="bg-purple-100 border border-purple-300 rounded px-2 py-1 text-purple-700">chaos_space_marines</div>
+                    <div class="bg-amber-100 border border-amber-300 rounded px-2 py-1 text-amber-700">hh_vehicles</div>
+                    <div class="bg-blue-100 border border-blue-300 rounded px-2 py-1 text-blue-700">gloomspite_gitz</div>
+                    <div class="bg-purple-100 border border-purple-300 rounded px-2 py-1 text-purple-700">necrons</div>
+                    <div class="bg-amber-100 border border-amber-300 rounded px-2 py-1 text-amber-700">hh_infantry</div>
+                  </div>
+                  <div class="flex gap-2 mt-2 text-xs">
+                    <span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded">AoS</span>
+                    <span class="bg-purple-100 text-purple-700 px-2 py-0.5 rounded">40k</span>
+                    <span class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded">Horus Heresy</span>
+                    <span class="text-red-500">← mixed, no seam</span>
+                  </div>
+                </div>
+              </div>
+              <p class="text-xs text-red-400 mt-2">"Build all AoS" means filtering by output path prefix — knowledge of the output path leaks into the caller.</p>
+            </div>
+          </div>
+
+          <!-- AFTER - hierarchical -->
+          <div>
+            <p class="label-mono text-slate-400 mb-3">After — game systems as first-class modules</p>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <div class="space-y-2">
+                <div class="border-2 border-blue-400 rounded-lg p-2 bg-blue-50">
+                  <p class="label-mono text-blue-600 mb-1">GameSystem.AOS</p>
+                  <div class="flex gap-1 flex-wrap text-xs font-mono">
+                    <span class="bg-blue-100 border border-blue-300 rounded px-2 py-0.5 text-blue-700">stormcast_eternals</span>
+                    <span class="bg-blue-100 border border-blue-300 rounded px-2 py-0.5 text-blue-700">flesh_eater_courts</span>
+                    <span class="bg-blue-100 border border-blue-300 rounded px-2 py-0.5 text-blue-700">gloomspite_gitz</span>
+                  </div>
+                </div>
+                <div class="border-2 border-purple-400 rounded-lg p-2 bg-purple-50">
+                  <p class="label-mono text-purple-600 mb-1">GameSystem.W40K</p>
+                  <div class="flex gap-1 flex-wrap text-xs font-mono">
+                    <span class="bg-purple-100 border border-purple-300 rounded px-2 py-0.5 text-purple-700">space_marines</span>
+                    <span class="bg-purple-100 border border-purple-300 rounded px-2 py-0.5 text-purple-700">chaos_space_marines</span>
+                    <span class="bg-purple-100 border border-purple-300 rounded px-2 py-0.5 text-purple-700">necrons</span>
+                  </div>
+                </div>
+                <div class="border-2 border-amber-400 rounded-lg p-2 bg-amber-50">
+                  <p class="label-mono text-amber-600 mb-1">GameSystem.HORUS_HERESY</p>
+                  <div class="flex gap-1 flex-wrap text-xs font-mono">
+                    <span class="bg-amber-100 border border-amber-300 rounded px-2 py-0.5 text-amber-700">hh_vehicles</span>
+                    <span class="bg-amber-100 border border-amber-300 rounded px-2 py-0.5 text-amber-700">hh_infantry</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="text-xs text-emerald-600 mt-2">Game system is the seam. Callers query by system, not by path prefix. Adding a new system is additive.</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-6 text-sm">
+          <div>
+            <p class="label-mono text-red-400 mb-2">Problem</p>
+            <p class="text-slate-700">Three game systems share one flat namespace. There's no seam between them. Callers who want "all AoS" must filter by output path prefix — the directory layout leaks into build logic.</p>
+          </div>
+          <div>
+            <p class="label-mono text-slate-500 mb-2">Solution</p>
+            <p class="text-slate-700">Nest factions under a <code class="font-mono bg-slate-100 px-1 rounded">GameSystem</code> key. FactionRegistry.load(system, key) makes the seam explicit. Speculative because the current single-faction CLI doesn't need the hierarchy yet.</p>
+          </div>
+          <div>
+            <p class="label-mono text-emerald-600 mb-2">Wins</p>
+            <ul class="space-y-1 text-slate-700">
+              <li>· locality: game-system rules live in one place</li>
+              <li>· leverage: build --system aos works without path knowledge</li>
+              <li>· adding a new game system is additive, not editorial</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </section>
+
+  <!-- TOP RECOMMENDATION -->
+  <section id="top-recommendation" class="bg-slate-900 text-white rounded-xl p-8">
+    <p class="label-mono text-slate-400 mb-3">Top recommendation</p>
+    <h2 class="text-2xl font-serif font-bold mb-3">Start with Candidate 1 — deepen <code class="text-xl font-mono bg-slate-800 px-2 py-0.5 rounded">build_faction</code></h2>
+    <p class="text-slate-300 max-w-2xl">The image pipeline seam is the highest-leverage change: it splits a shallow, untestable function into two deep modules without touching the data layer. Once the seam exists, Candidate 2 (FactionRegistry) slots in naturally as the module that feeds the pipeline. Candidates 3 and 4 are cleanup that follows from the structure Candidates 1 and 2 establish.</p>
+    <a href="#candidates" class="inline-block mt-4 text-emerald-400 underline text-sm">↑ Back to all candidates</a>
+  </section>
+
+</main>
+</body>
+</html>
